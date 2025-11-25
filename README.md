@@ -24,7 +24,7 @@ Advanced, risk-based Tor detection framework for Microsoft Defender XDR / Sentin
 
 \## Why this matters
 
-Not all Tor traffic is malicious — but all Tor traffic deserves investigation.  
+Not all Tor traffic is malicious - but all Tor traffic deserves investigation.  
 
 This framework separates legitimate privacy use from real threats (C2, exfiltration, hidden services, compromised servers, etc.).
 
