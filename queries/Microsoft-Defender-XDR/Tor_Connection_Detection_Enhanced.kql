@@ -1,0 +1,304 @@
+// ENHANCED TOR CONNECTION DETECTION RULE
+// Purpose: Detect Tor usage with risk-based severity scoring
+// Data Source: Live Tor exit node list from GitHub + Network Events
+// Author: Security Operations Team
+// Last Updated: 2025-11-26
+
+// SECTION 1: CONFIGURATION & TUNABLE PARAMETERS
+
+let BrowserProcesses = dynamic([
+    "brave.exe", "firefox.exe", "chrome.exe", "msedge.exe",
+    "opera.exe", "vivaldi.exe", "iexplore.exe", "safari.exe",
+    "tor.exe", "torbrowser.exe", "tor-browser.exe"
+]);
+
+let TorProcessNames = dynamic([
+    "tor.exe", "tor-browser.exe", "torbrowser.exe"
+]);
+
+let HighRiskProcesses = dynamic([
+    "powershell.exe", "pwsh.exe", "cmd.exe",
+    "wscript.exe", "cscript.exe", "mshta.exe",
+    "rundll32.exe", "regsvr32.exe", "certutil.exe"
+]);
+
+let ServerKeywords = dynamic([
+    "server", "srv", "dc", "domain", "sql", "db",
+    "exchange", "exch", "sharepoint", "sp",
+    "prod", "production", "prd"
+]);
+
+let WorkHoursStart = 7; // 7 AM
+let WorkHoursEnd = 19; // 7 PM
+
+let HighVolumeThreshold = 104857600; // 100 MB
+
+let LookbackPeriod = 7d;
+
+let AllowlistedUsers = dynamic([]);
+
+let AllowlistedDevices = dynamic([]);
+
+// SECTION 2: LOAD TOR RELAY DATA
+
+let TorRelayData = externaldata (
+    Nickname:string,
+    Fingerprint:string,
+    EntryAddress:string,
+    IPAddress:string,
+    Port:string,
+    AddressType:string,
+    Hostname:string,
+    CountryCode:string,
+    IsRunning:bool,
+    RelayPublishDate:string,
+    LastChangedIPData:string
+)
+[@"https://raw.githubusercontent.com/Shivammalaviya/Tor/main/torexitnodes.csv"]
+with (ignoreFirstRecord=true, format="csv")
+| where AddressType == "IPv4";
+
+let TorIPs = TorRelayData | summarize TorIPList = make_set(IPAddress);
+
+// SECTION 3: OUTBOUND TOR CONNECTIONS
+
+let OutboundTor = DeviceNetworkEvents
+| where TimeGenerated > ago(LookbackPeriod)
+| where RemoteIP in~ (TorIPs)
+| project
+    TimeGenerated,
+    Direction = "Outbound",
+    TorMatchIP = RemoteIP,
+    DeviceName,
+    DeviceId,
+    RemoteIP,
+    RemotePort,
+    RemoteUrl,
+    LocalIP,
+    LocalPort,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessAccountName,
+    InitiatingProcessParentFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessSHA256,
+    Protocol,
+    ActionType,
+    ReportId;
+
+// SECTION 4: INBOUND TOR CONNECTIONS
+
+let InboundTor = DeviceNetworkEvents
+| where TimeGenerated > ago(LookbackPeriod)
+| where LocalIP in~ (TorIPs)
+| project
+    TimeGenerated,
+    Direction = "Inbound",
+    TorMatchIP = LocalIP,
+    DeviceName,
+    DeviceId,
+    RemoteIP,
+    RemotePort,
+    RemoteUrl = "",
+    LocalIP,
+    LocalPort,
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessAccountName,
+    InitiatingProcessParentFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessSHA256,
+    Protocol,
+    ActionType,
+    ReportId;
+
+// SECTION 5: COMBINE & ENRICH WITH TOR RELAY INFO
+
+let AllTorConnections =
+OutboundTor
+| union InboundTor
+| join kind=leftouter (
+    TorRelayData
+    | project IPAddress, Nickname, CountryCode, Hostname, Port, IsRunning
+) on $left.TorMatchIP == $right.IPAddress;
+
+// SECTION 6: RISK ASSESSMENT & SEVERITY SCORING
+
+AllTorConnections
+// Step 1: Add time-based context
+| extend
+    Hour = hourofday(TimeGenerated),
+    DayOfWeek = dayofweek(TimeGenerated),
+    Date = startofday(TimeGenerated)
+
+// Step 2: Classify process types
+| extend
+    IsBrowser = InitiatingProcessFileName in~ (BrowserProcesses),
+    IsTorProcess = InitiatingProcessFileName in~ (TorProcessNames),
+    IsHighRiskProcess = InitiatingProcessFileName in~ (HighRiskProcesses)
+
+// Step 3: Classify device types
+| extend
+    IsServer = DeviceName has_any (ServerKeywords)
+
+// Step 4: Time-based risk factors
+| extend
+    IsOffHours = (Hour < WorkHoursStart or Hour > WorkHoursEnd),
+    IsWeekend = (DayOfWeek == time(0) or DayOfWeek == time(6)),
+    IsLateNight = (Hour >= 22 or Hour <= 5)
+
+// Step 5: Check allowlists
+| extend
+    IsAllowlistedUser = InitiatingProcessAccountName in~ (AllowlistedUsers),
+    IsAllowlistedDevice = DeviceName in~ (AllowlistedDevices)
+
+// Step 6: Process path risk assessment
+| extend
+    ProcessPathRisk = case(
+        InitiatingProcessFolderPath has_any ("\\Temp\\", "\\AppData\\Local\\Temp\\", "\\Users\\Public\\"), "High",
+        InitiatingProcessFolderPath has_any ("\\Downloads\\", "\\Desktop\\"), "Medium",
+        InitiatingProcessFolderPath has_any ("\\Program Files\\", "\\Program Files (x86)\\"), "Low",
+        "Unknown"
+    )
+
+// Step 7: Calculate Risk Score (0-100 scale)
+| extend RiskScore =
+    tolong(iff(Direction == "Inbound", 30, 0)) +
+    tolong(iff(IsServer, 30, 0)) +
+    tolong(iff(IsHighRiskProcess, 30, 0)) +
+    tolong(iff(not(IsBrowser) and not(IsTorProcess), 20, 0)) +
+    tolong(iff(ProcessPathRisk == "High", 20, 0)) +
+    tolong(iff(IsLateNight, 10, 0)) +
+    tolong(iff(IsWeekend, 5, 0)) +
+    tolong(iff(IsOffHours and not(IsLateNight), 5, 0)) +
+    tolong(iff(ProcessPathRisk == "Medium", 5, 0)) +
+    tolong(iff(IsBrowser or IsTorProcess, 1, 0))
+
+// Step 8: Adjust for allowlisted entities (reduce score by 50%)
+| extend RiskScore = tolong(iff(IsAllowlistedUser or IsAllowlistedDevice, RiskScore * 0.5, toreal(RiskScore)))
+
+// Step 9: Assign Severity Level
+| extend Severity =
+    case(
+        RiskScore >= 30, "Critical",
+        RiskScore >= 20, "High",
+        RiskScore >= 10, "Medium",
+        RiskScore >= 5, "Low",
+        "Informational"
+    )
+
+// Step 10: Build Risk Indicators Array
+| extend RiskIndicators =
+    array_concat(
+        iff(Direction == "Inbound", dynamic(["🚨 Inbound Connection"]), dynamic([])),
+        iff(IsServer, dynamic(["🚨 Server Asset"]), dynamic([])),
+        iff(IsHighRiskProcess, dynamic(["🚨 High-Risk Process"]), dynamic([])),
+        iff(not(IsBrowser) and not(IsTorProcess), dynamic(["⚠️ Non-Browser Process"]), dynamic([])),
+        iff(ProcessPathRisk == "High", dynamic(["⚠️ Suspicious Path"]), dynamic([])),
+        iff(IsLateNight, dynamic(["⚠️ Late Night (10PM-5AM)"]), dynamic([])),
+        iff(IsWeekend, dynamic(["⚠️ Weekend Activity"]), dynamic([])),
+        iff(IsOffHours and not(IsLateNight), dynamic(["⚠️ Off Hours"]), dynamic([])),
+        iff(IsAllowlistedUser or IsAllowlistedDevice, dynamic(["✅ Allowlisted"]), dynamic([]))
+    )
+
+| extend RiskIndicatorsText = strcat_array(RiskIndicators, ", ")
+
+// Step 11: Investigation Priority & Response Actions
+| extend
+    InvestigationPriority = case(
+        Severity == "Critical", "P1 - Immediate (Isolate host, contact IR team)",
+        Severity == "High", "P2 - Within 1 hour (Investigate, contact user)",
+        Severity == "Medium", "P3 - Within 4 hours (Review and document)",
+        Severity == "Low", "P4 - Within 24 hours (Log review)",
+        "P5 - Log only (Monitor for patterns)"
+    ),
+    RecommendedActions = case(
+        Severity == "Critical", "1. Isolate device 2. Memory dump 3. Check lateral movement 4. Escalate to IR",
+        Severity == "High", "1. Contact user immediately 2. Review process tree 3. Check file operations 4. Scan for malware",
+        Severity == "Medium", "1. Email user 2. Review download history 3. Check for policy violations",
+        Severity == "Low", "1. Log event 2. Track frequency 3. User awareness email if repeated",
+        "Monitor - no immediate action"
+    )
+
+// Step 12: Add Threat Context
+| extend
+    ThreatScenario = case(
+        Direction == "Inbound" and IsServer, "Possible hidden service or backdoor on server",
+        Direction == "Inbound", "Possible hidden service or unauthorized access point",
+        IsServer, "Compromised server attempting C2 communication via Tor",
+        IsHighRiskProcess, "Possible malware C2 communication",
+        not(IsBrowser) and not(IsTorProcess), "Unauthorized tool using Tor (investigate purpose)",
+        IsLateNight and IsBrowser, "Off-hours browsing - possible data exfiltration or policy violation",
+        IsBrowser and IsOffHours, "Off-hours browsing - review download activity",
+        IsBrowser, "Standard Tor usage - review for policy compliance",
+        "Unknown threat pattern - investigate"
+    )
+
+// Step 13: Add Geographic Context
+| extend
+    TorNodeLocation = strcat(CountryCode, " - ", Hostname),
+    IsRunningStatus = case(
+        IsRunning == true, "Active",
+        IsRunning == false, "Inactive",
+        "Unknown"
+    )
+
+// SECTION 7: FINAL OUTPUT WITH ALL ENRICHMENTS
+
+| project
+    // Alert Metadata
+    TimeGenerated,
+    Severity,
+    RiskScore,
+    InvestigationPriority,
+    ThreatScenario,
+    RiskIndicatorsText,
+    RecommendedActions,
+    // Connection Details
+    Direction,
+    TorMatchIP,
+    TorNodeLocation,
+    Nickname,
+    IsRunningStatus,
+    // Device Information
+    DeviceName,
+    DeviceId,
+    IsServer,
+    IsAllowlistedDevice,
+    // Network Details
+    RemoteIP,
+    RemotePort,
+    RemoteUrl,
+    LocalIP,
+    LocalPort,
+    Protocol,
+    ActionType,
+    // Process Information
+    InitiatingProcessFileName,
+    InitiatingProcessCommandLine,
+    InitiatingProcessParentFileName,
+    InitiatingProcessFolderPath,
+    InitiatingProcessSHA256,
+    IsBrowser,
+    IsTorProcess,
+    IsHighRiskProcess,
+    ProcessPathRisk,
+    // User Context
+    InitiatingProcessAccountName,
+    IsAllowlistedUser,
+    // Temporal Context
+    Hour,
+    DayOfWeek,
+    IsOffHours,
+    IsWeekend,
+    IsLateNight,
+    // Tor Relay Info
+    CountryCode,
+    Hostname,
+    Port,
+    IsRunning,
+    // Investigation Fields
+    ReportId
+
+// Step 14: Sort by Risk Score and Time
+| sort by RiskScore desc, TimeGenerated desc;

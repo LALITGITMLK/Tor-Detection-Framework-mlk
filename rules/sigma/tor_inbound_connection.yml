@@ -1,0 +1,18 @@
+title: Inbound Tor Connection
+id: tor_inbound
+status: experimental
+description: Detects inbound connections from known Tor exit nodes
+author: Security Operations Team
+date: 2025-11-26
+tags:
+  - attack.command_and_control
+  - attack.t1090
+logsource:
+  category: network_connection
+detection:
+  selection:
+    direction: inbound
+    dst_ip:
+      - in_tor_exit_list
+  condition: selection
+level: critical

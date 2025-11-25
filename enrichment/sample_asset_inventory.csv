@@ -1,0 +1,4 @@
+"DeviceName,Type,Role"
+"SERVER01,server,domain_controller"
+"WORKSTATION-123,workstation,standard_user"
+"DB-PROD,server,database"

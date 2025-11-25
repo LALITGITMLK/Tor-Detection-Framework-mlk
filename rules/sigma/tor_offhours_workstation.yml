@@ -1,0 +1,21 @@
+title: Off-Hours Tor Connection from Workstation
+id: tor_offhours
+status: experimental
+description: Detects Tor usage outside normal work hours
+author: Security Operations Team
+date: 2025-11-26
+tags:
+  - attack.persistence
+  - attack.t1078
+logsource:
+  category: network_connection
+detection:
+  selection:
+    direction: outbound
+    dst_ip:
+      - in_tor_exit_list
+    src_host_type: workstation
+  filter_time:
+    time: 'off_hours'
+  condition: selection and filter_time
+level: medium

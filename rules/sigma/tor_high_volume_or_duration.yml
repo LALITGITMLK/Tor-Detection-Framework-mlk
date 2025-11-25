@@ -1,0 +1,22 @@
+title: High Volume or Long Duration Tor Connection
+id: tor_high_volume
+status: experimental
+description: Detects large data transfers or sustained Tor sessions
+author: Security Operations Team
+date: 2025-11-26
+tags:
+  - attack.exfiltration
+  - attack.t1048
+logsource:
+  category: network_connection
+detection:
+  selection:
+    direction: outbound
+    dst_ip:
+      - in_tor_exit_list
+  filter_volume:
+    bytes_total: '>100MB'
+  filter_duration:
+    duration: '>30min'
+  condition: selection and (filter_volume or filter_duration)
+level: medium

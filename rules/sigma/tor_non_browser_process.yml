@@ -1,0 +1,20 @@
+title: Tor Connection from Non-Browser Process
+id: tor_non_browser
+status: experimental
+description: Detects Tor usage from suspicious processes (e.g., PowerShell)
+author: Security Operations Team
+date: 2025-11-26
+tags:
+  - attack.command_and_control
+  - attack.t1059
+logsource:
+  category: network_connection
+detection:
+  selection:
+    direction: outbound
+    dst_ip:
+      - in_tor_exit_list
+    process_name:
+      - not_in_browser_list
+  condition: selection
+level: high

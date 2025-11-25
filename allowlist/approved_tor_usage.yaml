@@ -1,0 +1,6 @@
+users:
+  - security.researcher@example.com
+devices:
+  - RESEARCH-LAB-01
+processes:
+  - tor-browser.exe

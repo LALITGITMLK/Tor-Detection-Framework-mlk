@@ -1,0 +1,19 @@
+title: Tor Connection from Server Asset
+id: tor_server
+status: experimental
+description: Detects Tor usage from critical servers (e.g., DC, DB)
+author: Security Operations Team
+date: 2025-11-26
+tags:
+  - attack.command_and_control
+  - attack.exfiltration
+logsource:
+  category: network_connection
+detection:
+  selection:
+    direction: outbound
+    dst_ip:
+      - in_tor_exit_list
+    src_host_type: server
+  condition: selection
+level: critical
