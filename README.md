@@ -1,60 +1,91 @@
-\# Tor Detection Framework
+# Tor Detection Framework
 
+![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)
+![Platform](https://img.shields.io/badge/platform-Microsoft%20Defender%20XDR-blue)
+![Sigma](https://img.shields.io/badge/Sigma-Rules-brightgreen)
+![Last Update](https://img.shields.io/github/last-commit/LALITGITMLK/Tor-Detection-Framework-mlk)
 
+## Overview
 
-Advanced, risk-based Tor detection framework for Microsoft Defender XDR / Sentinel environments.
+**Advanced risk-based Tor detection for Microsoft Defender XDR & Sentinel.**  
+This framework separates legitimate privacy usage from genuine threats (C2, exfiltration, hidden services, etc.) and gives SOC teams actionable detection with context-aware severity, allowlisting, and automated enrichment.
 
+---
 
+## Features
 
-\## Features
+- **KQL hunting query** (dynamic risk scoring 0–100)
+- **Context-aware severity** (Critical → Informational)
+- **Sigma rules** for cross-platform detection
+- **Tiered response playbooks**
+- **Daily Tor exit node auto-update script**
+- **Allowlisting & tuning guidance**
+- **Full documentation and philosophy in `/docs`**
 
-\- Full KQL hunting query with dynamic risk scoring (0–100)
+---
 
-\- Context-aware severity (Critical → Informational)
+## Who is this For?
 
-\- Sigma rules for cross-platform detection
+- SOC analysts and incident responders in Defender/Sentinel environments
+- Blue Teams needing actionable, automated Tor detection
+- Anyone seeking robust, risk-adjusted network monitoring
 
-\- Response playbooks per severity tier
+**Requires:**  
+- Familiarity with KQL and Microsoft Defender/Sentinel  
+- Basic shell or task scheduler usage for enrichment scripts
 
-\- Daily Tor exit node auto-update script
+---
 
-\- Built-in allowlisting \& tuning guidance
+## Quick Start
 
+1. **KQL Hunting:**  
+   Copy queries from [`queries/`](./queries/) into Advanced Hunting.
 
+2. **Auto-Update Exit Nodes:**  
+   Schedule [`enrichment/tor_exit_nodes/update_daily.sh`](./enrichment/tor_exit_nodes/update_daily.sh).
 
-\## Why this matters
+3. **Deploy Sigma Rules:**  
+   Import rules from [`rules/sigma/`](./rules/sigma/) into your SIEM/SOC platform.
 
-Not all Tor traffic is malicious - but all Tor traffic deserves investigation.  
+4. **Configure Allowlisting:**  
+   Edit files in [`allowlist/`](./allowlist/) as needed.
 
-This framework separates legitimate privacy use from real threats (C2, exfiltration, hidden services, compromised servers, etc.).
+5. **Operational Playbooks:**  
+   Use [`playbooks/`](./playbooks/) to standardize and automate response.
 
+---
 
+## Repository Structure
 
-\## Quick Start
+```
+queries/      — KQL queries for threat hunting
+rules/sigma/  — Platform-agnostic Sigma detection rules
+enrichment/   — Scripts for Tor exit node list automation
+playbooks/    — Response/action scripts and runbooks
+allowlist/    — Allowlisting, tuning, exceptions
+docs/         — Detection philosophy, detailed documentation
+```
 
-1\. Drop the KQL query into Advanced Hunting
+---
 
-2\. Schedule `enrichment/tor\_exit\_nodes/update\_daily.sh` (or use your own source)
+## Contributing
 
-3\. Import Sigma rules into your detection platform
+PRs, feedback, and new rules/scripts are welcome!  
+See [CONTRIBUTING.md](./CONTRIBUTING.md) for guidelines.
 
-4\. Customize allowlists and server keywords for your environment
+---
 
+## License
 
+MIT Licensed — use, modify, and share freely.
 
-\## Repository Structure
+---
 
-\- `queries/` → Ready-to-run KQL
+## Acknowledgements
 
-\- `rules/sigma/` → Platform-agnostic Sigma rules
+- Project by [Lalit Kumar](https://github.com/LALITGITMLK)
+- Inspired by threat hunting and open detection communities
 
-\- `docs/` → Full detection philosophy \& flow
+---
 
-\- `playbooks/` → Tiered response actions
-
-\- `enrichment/` → Tor node list automation
-
-
-
-MIT Licensed – use, modify, share freely.
-
+> _Empowering defenders to distinguish privacy tools from real threats._
